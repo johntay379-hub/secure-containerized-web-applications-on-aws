@@ -1,5 +1,4 @@
 terraform {
-  required_version = ">= 1.5.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -9,37 +8,33 @@ terraform {
 }
 
 provider "aws" {
-  region = var.aws_region
+  region = "us-east-1"
 }
 
-# Core Secure Network Isolation Blueprint
-resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
-
-  tags = {
-    Name        = "secure-production-vpc"
-    Environment = var.environment
-  }
+variable "environment" {
+  type    = string
+  default = "production"
 }
 
-# Least-Privilege Application Security Group
-resource "aws_security_group" "app_sg" {
-  name        = "app-container-security-group"
-  description = "TFSEC-compliant least privilege network boundary control"
+# =========================================================================
+# SECURITY GROUPS (The Firewalls)
+# =========================================================================
+
+resource "aws_security_group" "ec2_sg" {
+  name        = "secure-app-ec2-sg"
+  description = "Allow inbound application traffic"
   vpc_id      = aws_vpc.main.id
 
+  # Inbound FastAPI traffic
   ingress {
-    description = "Allow inbound container engine application traffic"
     from_port   = 8080
     to_port     = 8080
     protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/16"] # Restricted to internal VPC architecture only
+    cidr_blocks = ["0.0.0.0/0"] # In production, restrict this to an ALB!
   }
 
+  # Outbound traffic (needed to download patches and Docker images)
   egress {
-    description = "Allow container egress for patches"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -47,40 +42,79 @@ resource "aws_security_group" "app_sg" {
   }
 
   tags = {
-    Name = "secure-app-sg"
+    Name = "secure-app-security-group"
   }
 }
 
-# Fetch the latest verified Ubuntu 24.04 LTS AMI ID automatically
+# =========================================================================
+# AWS ECR (Our Secure Container Vault)
+# =========================================================================
+
+resource "aws_ecr_repository" "app_repo" {
+  name                 = "secure-python-app"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+# =========================================================================
+# IAM PROFILE (Gives EC2 permission to pull from ECR)
+# =========================================================================
+
+resource "aws_iam_role" "ec2_role" {
+  name = "secure-ec2-ecr-reader-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecr_read" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "secure-ec2-instance-profile"
+  role = aws_iam_role.ec2_role.name
+}
+
+# =========================================================================
+# COMPUTE LAYER (The Virtual Machine)
+# =========================================================================
+
+# Fetch latest stable Ubuntu 22.04 LTS AMI
 data "aws_ami" "ubuntu" {
   most_recent = true
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-noble-24.04-amd64-server-*"]
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
   }
   filter {
     name   = "virtualization-type"
     values = ["hvm"]
   }
-  owners = ["099720109477"] # Official Canonical Owner ID
+  owners = ["099720109477"] # Canonical
 }
 
-# Secure Isolated EC2 Instance
-resource "aws_instance" "web_server" {
-  ami           = data.aws_ami.ubuntu.id
-  instance_type = "t3.micro"
-  subnet_id     = aws_subnet.private.id # Placed safely inside the private subnet
+resource "aws_instance" "web" {
+  ami                  = data.aws_ami.ubuntu.id
+  instance_type        = "t3.micro"
+  subnet_id            = aws_subnet.public.id # Placed in public subnet for Road 1 direct routing
+  vpc_security_group_ids = [aws_security_group.ec2_sg.id]
+  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
 
-  vpc_security_group_ids = [aws_security_group.app_sg.id]
-
-  # Hardening: Force IMDSv2 (Prevents SSRF cloud credential theft attacks)
-  metadata_options {
-    http_endpoint               = "enabled"
-    http_tokens                 = "required"
-    http_put_response_hop_limit = 1
-  }
-
-  # Root Volume Hardening
   root_block_device {
     volume_size           = 20
     volume_type           = "gp3"
@@ -94,7 +128,7 @@ resource "aws_instance" "web_server" {
               apt-get update -y
               apt-get install -y apt-transport-https ca-certificates curl software-properties-common
               curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
-              add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+              add-apt-repository -y "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
               apt-get update -y
               apt-get install -y docker-ce docker-ce-cli containerd.io
               systemctl enable docker
