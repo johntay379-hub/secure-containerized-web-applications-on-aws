@@ -11,11 +11,6 @@ provider "aws" {
   region = "us-east-1"
 }
 
-variable "environment" {
-  type    = string
-  default = "production"
-}
-
 # =========================================================================
 # SECURITY GROUPS (The Firewalls)
 # =========================================================================
@@ -111,7 +106,7 @@ data "aws_ami" "ubuntu" {
 resource "aws_instance" "web" {
   ami                  = data.aws_ami.ubuntu.id
   instance_type        = "t3.micro"
-  subnet_id            = aws_subnet.public.id # Placed in public subnet for Road 1 direct routing
+  subnet_id            = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
   iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
 
