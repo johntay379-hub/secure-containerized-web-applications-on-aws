@@ -1,57 +1,80 @@
-# Public Subnet (For Load Balancers / Public ingress)
+# =========================================================================
+# THE VIRTUAL PRIVATE CLOUD (Our Core Network Sandbox)
+# =========================================================================
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = {
+    Name = "secure-production-vpc"
+  }
+}
+
+# =========================================================================
+# SUBNETS (Public and Private Zones)
+# =========================================================================
 resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.1.0/24"
-  availability_zone       = "${var.aws_region}a"
-  map_public_ip_on_launch = false # Hardening: Prevent auto-assigning public IPs
+  availability_zone       = "us-east-1a"
+  map_public_ip_on_launch = true
 
   tags = {
-    Name = "production-public-subnet-1a"
+    Name = "public-entry-subnet"
   }
 }
 
-# Isolated Private Subnet (Where our secure container will actually run)
 resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.2.0/24"
-  availability_zone = "${var.aws_region}a"
+  availability_zone = "us-east-1b"
 
   tags = {
-    Name = "production-private-subnet-1a"
+    Name = "private-isolated-subnet"
   }
 }
 
-# Internet Gateway for public routing
+# =========================================================================
+# COMMUNICATIONS (Gateways and Routing)
+# =========================================================================
 resource "aws_internet_gateway" "gw" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "production-igw"
+    Name = "production-internet-gateway"
   }
 }
 
-# Elastic IP for NAT Gateway Allocation
-resource "aws_eip" "nat" {
-  domain = "vpc"
-  
+resource "aws_route_table" "public_rt" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.gw.id
+  }
+
   tags = {
-    Name = "nat-gateway-eip"
+    Name = "public-routing-table"
   }
 }
 
-# NAT Gateway allowing private resources safe outbound traffic without public exposure
-resource "aws_nat_gateway" "nat" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public.id
+resource "aws_route_table_association" "public_assoc" {
+  subnet_id      = aws_subnet.public.id
+  route_table_id = aws_route_table.public_rt.id
+}
 
-  tags = {
-    Name = "production-nat-gateway"
-  }
-  
+resource "aws_eip" "nat_eip" {
+  domain     = "vpc"
   depends_on = [aws_internet_gateway.gw]
 }
 
-# Routing tables ensuring absolute traffic isolation
+resource "aws_nat_gateway" "nat" {
+  allocation_id = aws_eip.nat_eip.id
+  subnet_id     = aws_subnet.public.id
+  depends_on    = [aws_internet_gateway.gw]
+}
+
 resource "aws_route_table" "private_rt" {
   vpc_id = aws_vpc.main.id
 
