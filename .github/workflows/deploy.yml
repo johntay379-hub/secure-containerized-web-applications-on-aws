@@ -57,3 +57,21 @@ jobs:
       run: |
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./app
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+- name: Deploy Container to EC2 via AWS SSM
+      env:
+        INSTANCE_ID: i-044fee37bdc7fe6d2
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: secure-python-app
+        IMAGE_TAG: latest
+      run: |
+        aws ssm send-command \
+          --instance-ids "$INSTANCE_ID" \
+          --document-name "AWS-RunShellScript" \
+          --parameters 'commands=[
+            "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin '"$ECR_REGISTRY"'",
+            "docker pull '"$ECR_REGISTRY"'/'"$ECR_REPOSITORY"':'"$IMAGE_TAG"'",
+            "docker stop web-app || true",
+            "docker rm web-app || true",
+            "docker run -d --name web-app -p 8080:8080 '"$ECR_REGISTRY"'/'"$ECR_REPOSITORY"':'"$IMAGE_TAG"'"
+          ]' \
+          --region us-east-1

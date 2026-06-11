@@ -61,7 +61,7 @@ resource "aws_ecr_repository" "app_repo" {
 resource "aws_iam_role" "ec2_role" {
   name = "secure-ec2-ecr-reader-role"
 
-  assume_role_policy = jsonencode({
+assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
@@ -75,11 +75,19 @@ resource "aws_iam_role" "ec2_role" {
   })
 }
 
+# 1. This gives your EC2 server permission to pull Docker containers from ECR
 resource "aws_iam_role_policy_attachment" "ecr_read" {
   role       = aws_iam_role.ec2_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
 
+# 2. This allows AWS Systems Manager to securely send deployment commands
+resource "aws_iam_role_policy_attachment" "ssm_managed" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# 3. This links the IAM role to a profile that the EC2 instance can actually wear
 resource "aws_iam_instance_profile" "ec2_profile" {
   name = "secure-ec2-instance-profile"
   role = aws_iam_role.ec2_role.name
