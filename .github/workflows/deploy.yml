@@ -6,39 +6,54 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  id-token: write   # Mandatory for requesting the OIDC cryptographic token
+  contents: read    # Allows cloning your repository code
+
 jobs:
   security-and-build:
     runs-on: ubuntu-latest
     
     steps:
-    # 1. Checkout the source code from your repository
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    # 2. Run an automated Trivy scan directly inside the pipeline
     - name: Run Trivy Vulnerability Scanner
       uses: aquasecurity/trivy-action@master
       with:
         scan-type: 'fs'
         scan-ref: '.'
         format: 'table'
-        exit-code: '1' # Hardening: Stop the build if vulnerabilities are found
+        exit-code: '1'
         severity: 'CRITICAL,HIGH'
 
-    # 3. Setup Terraform CLI inside the GitHub runner
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
       with:
         terraform_version: "1.5.0"
 
-    # 4. Verify Infrastructure code layout compliance
     - name: Terraform Validate
       run: |
         cd terraform
         terraform init -backend=false
         terraform validate
 
-    # 5. Build the production Docker container if security tests pass
-    - name: Build Hardened Docker Image
+    - name: Authenticate to AWS via OIDC
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        aws-region: us-east-1
+        audience: sts.amazonaws.com
+
+    - name: Log in to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, Tag, and Push Hardened Docker Image to ECR
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: secure-python-app
+        IMAGE_TAG: latest
       run: |
-        docker build -t secure-python-app:latest ./app# Ensure you are at the project root
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./app
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
