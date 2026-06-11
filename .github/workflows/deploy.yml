@@ -69,10 +69,10 @@ jobs:
           --instance-ids "$INSTANCE_ID" \
           --document-name "AWS-RunShellScript" \
           --parameters 'commands=[
-            "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin '"$ECR_REGISTRY"'",
-            "docker pull '"$ECR_REGISTRY"'/'"$ECR_REPOSITORY"':'"$IMAGE_TAG"'",
-            "docker stop web-app || true",
-            "docker rm web-app || true",
-            "docker run -d --name web-app -p 8080:8080 '"$ECR_REGISTRY"'/'"$ECR_REPOSITORY"':'"$IMAGE_TAG"'"
+            "sudo /usr/local/bin/aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin '"$ECR_REGISTRY"'",
+            "sudo docker stop web-app || true",
+            "sudo docker rm -f web-app || true",
+            "sudo docker pull '"$ECR_REGISTRY"'/'"$ECR_REPOSITORY"':'"$IMAGE_TAG"'",
+            "sudo docker run -d --name web-app -p 8080:8080 '"$ECR_REGISTRY"'/'"$ECR_REPOSITORY"':'"$IMAGE_TAG"'"
           ]' \
           --region us-east-1
