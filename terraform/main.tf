@@ -127,16 +127,27 @@ resource "aws_instance" "web" {
 
   # Automated Bootstrapping Script: Native Docker Installation
   user_data = <<-EOF
-              #!/bin/bash
-              apt-get update -y
-              apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
-              add-apt-repository -y "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-              apt-get update -y
-              apt-get install -y docker-ce docker-ce-cli containerd.io
-              systemctl enable docker
-              systemctl start docker
+#!/bin/bash
+              # 1. Update system packages
+              sudo apt-get update -y
+              sudo apt-get upgrade -y
+
+              # 2. Install Docker if not already present
+              sudo apt-get install -y docker.io
+              sudo systemctl start docker
+              sudo systemctl enable docker
+              sudo usermod -aG docker ubuntu
+
+              # 3. Install AWS CLI v2 (Missing Piece!)
+              sudo apt-get install -y unzip
+              curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+              unzip awscliv2.zip
+              sudo ./aws/install
+
+              # 4. Restart SSM Agent to pick up system path changes
+              sudo systemctl restart amazon-ssm-agent
               EOF
+
 
   tags = {
     Name        = "secure-production-server"
